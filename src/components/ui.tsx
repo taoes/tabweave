@@ -1,0 +1,213 @@
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { motion } from 'framer-motion'
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from 'react'
+
+export function Button({ className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      className={`inline-flex items-center justify-center rounded-xl px-3 py-2 text-sm font-medium transition active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+      {...props}
+    />
+  )
+}
+
+export function PrimaryButton(props: ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <Button {...props} className={`bg-violet-500 text-white hover:bg-violet-400 ${props.className ?? ''}`} />
+}
+
+export function GhostButton(props: ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <Button {...props} className={`bg-zinc-900/70 text-zinc-200 ring-1 ring-white/10 hover:bg-zinc-800 ${props.className ?? ''}`} />
+}
+
+export function DangerButton(props: ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <Button {...props} className={`bg-red-500/10 text-red-300 ring-1 ring-red-400/20 hover:bg-red-500/20 ${props.className ?? ''}`} />
+}
+
+export function FieldLabel({ children }: { children: ReactNode }) {
+  return <label className="block text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">{children}</label>
+}
+
+export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      {...props}
+      className={`w-full rounded-xl border border-white/10 bg-zinc-950/70 px-3 py-2 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-4 focus:ring-violet-500/10 ${props.className ?? ''}`}
+    />
+  )
+}
+
+export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      {...props}
+      className={`w-full rounded-xl border border-white/10 bg-zinc-950/70 px-3 py-2 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-violet-400/70 focus:ring-4 focus:ring-violet-500/10 ${props.className ?? ''}`}
+    />
+  )
+}
+
+type AnchorStyle = React.CSSProperties & {
+  anchorName?: string
+  positionAnchor?: string
+  positionTryFallbacks?: string
+}
+
+export interface AnchorSelectOption<T extends string> {
+  value: T
+  label: string
+  description?: string
+}
+
+export function AnchorSelect<T extends string>({
+  value,
+  options,
+  onChange,
+  align = 'start',
+  className = '',
+}: {
+  value: T
+  options: AnchorSelectOption<T>[]
+  onChange: (value: T) => void
+  align?: 'start' | 'end'
+  className?: string
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const rawId = useId()
+  const anchorName = useMemo(() => `--tabweave-select-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`, [rawId])
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const selected = options.find((option) => option.value === value) ?? options[0]
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (!dropdownRef.current?.contains(target) && !triggerRef.current?.contains(target)) {
+        setIsOpen(false)
+      }
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsOpen(false)
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isOpen])
+
+  return (
+    <div className={`relative ${className}`}>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((open) => !open)}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            setIsOpen(true)
+          }
+        }}
+        className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-zinc-950/70 px-3 py-2 text-left text-sm text-zinc-100 outline-none transition hover:bg-zinc-900 focus:border-violet-400/70 focus:ring-4 focus:ring-violet-500/10"
+        style={{ anchorName } as AnchorStyle}
+      >
+        <span className="min-w-0">
+          <span className="block truncate">{selected?.label}</span>
+          {selected?.description && <span className="mt-0.5 block truncate text-[11px] text-zinc-600">{selected.description}</span>}
+        </span>
+        <svg
+          className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          aria-hidden="true"
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+
+      <div
+        ref={dropdownRef}
+        role="listbox"
+        className={`fixed z-50 min-w-[var(--anchor-width,14rem)] overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/95 py-1.5 shadow-2xl shadow-black/40 backdrop-blur-xl transition-all duration-150 ${
+          isOpen ? 'scale-100 opacity-100' : 'pointer-events-none scale-95 opacity-0'
+        }`}
+        style={
+          {
+            positionAnchor: anchorName,
+            top: 'anchor(bottom)',
+            ...(align === 'start' ? { left: 'anchor(left)' } : { right: 'anchor(right)' }),
+            width: 'anchor-size(width)',
+            translate: '0 8px',
+            positionTryFallbacks: 'flip-block',
+          } as AnchorStyle
+        }
+      >
+        {options.map((option) => {
+          const active = option.value === value
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="option"
+              aria-selected={active}
+              className={`flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition ${
+                active ? 'bg-violet-500/15 text-violet-100' : 'text-zinc-300 hover:bg-white/[0.06] hover:text-zinc-100'
+              }`}
+              onClick={() => {
+                onChange(option.value)
+                setIsOpen(false)
+              }}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-violet-300' : 'bg-zinc-700'}`} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{option.label}</span>
+                {option.description && <span className="mt-0.5 block truncate text-[11px] text-zinc-600">{option.description}</span>}
+              </span>
+              {active && (
+                <svg className="h-4 w-4 text-violet-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="m5 13 4 4L19 7" />
+                </svg>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+export function Switch({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <motion.button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className="relative h-6 w-11 shrink-0 rounded-full outline-none focus:ring-4 focus:ring-violet-500/15"
+      aria-pressed={checked}
+      animate={{ backgroundColor: checked ? '#8b5cf6' : '#3f3f46' }}
+      whileTap={{ scale: 0.96 }}
+      transition={{ type: 'spring', stiffness: 500, damping: 36 }}
+    >
+      <motion.span
+        className="absolute left-0 top-1 h-4 w-4 rounded-full bg-white shadow-[0_3px_8px_rgba(0,0,0,.25),0_1px_3px_rgba(0,0,0,.18)]"
+        animate={{ x: checked ? 24 : 4 }}
+        transition={{ type: 'spring', stiffness: 520, damping: 34 }}
+      />
+    </motion.button>
+  )
+}
+
+export function EmptyState({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center">
+      <div className="text-sm font-medium text-zinc-200">{title}</div>
+      <div className="mt-1 text-xs leading-5 text-zinc-500">{description}</div>
+    </div>
+  )
+}

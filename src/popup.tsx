@@ -1,0 +1,381 @@
+import { StrictMode, useCallback, useEffect, useMemo, useState } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import { COLOR_CLASS } from './lib/constants'
+import { getPreferences, getRules } from './lib/storage'
+import { applyTheme } from './lib/theme'
+import { getShortcutParts } from './lib/shortcuts'
+import { applyRulesToTabs, createGroupFromTabs, getCurrentWindowSnapshot, queryTargetWindowTabs } from './lib/grouping'
+import type { ShortcutInfo, TabSnapshot, WindowSnapshot } from './lib/types'
+import { EmptyState, GhostButton, PrimaryButton, TextInput } from './components/ui'
+
+function runtimeAvailable() {
+  return typeof chrome !== 'undefined' && Boolean(chrome.tabs && chrome.tabGroups)
+}
+
+function getTabFallbackLabel(tab: TabSnapshot) {
+  try {
+    const host = new URL(tab.url).hostname.replace(/^www\./, '')
+    return host.charAt(0).toUpperCase() || '•'
+  } catch {
+    return '•'
+  }
+}
+
+
+function ShortcutKeys({ shortcut, subtle = false }: { shortcut: string; subtle?: boolean }) {
+  const parts = getShortcutParts(shortcut)
+  return (
+    <span className="inline-flex items-center gap-1 align-middle">
+      {parts.map((part) => (
+        <kbd
+          key={part}
+          className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
+            subtle ? 'bg-white/10 text-zinc-400' : 'bg-white/15 text-white/80'
+          }`}
+        >
+          {part}
+        </kbd>
+      ))}
+    </span>
+  )
+}
+
+function TabIcon({ tab, className = '' }: { tab: TabSnapshot; className?: string }) {
+  const [failed, setFailed] = useState(false)
+
+  if (tab.favIconUrl && !failed) {
+    return (
+      <span className={`flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-md bg-zinc-800 ring-1 ring-white/10 ${className}`}>
+        <img src={tab.favIconUrl} alt="" className="h-4 w-4" onError={() => setFailed(true)} />
+      </span>
+    )
+  }
+
+  return (
+    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-zinc-800 text-[10px] font-semibold text-zinc-500 ring-1 ring-white/10 ${className}`}>
+      {getTabFallbackLabel(tab)}
+    </span>
+  )
+}
+
+export function Popup() {
+  const [snapshot, setSnapshot] = useState<WindowSnapshot>({ groups: [], ungroupedTabs: [] })
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [selected, setSelected] = useState<number[]>([])
+  const [newGroupTitle, setNewGroupTitle] = useState('')
+  const [message, setMessage] = useState('')
+  const [shortcuts, setShortcuts] = useState<ShortcutInfo[]>([])
+
+  const allTabCount = useMemo(
+    () => snapshot.ungroupedTabs.length + snapshot.groups.reduce((total, group) => total + group.tabs.length, 0),
+    [snapshot],
+  )
+
+  const commitSnapshot = useCallback((next: WindowSnapshot) => {
+    const liveTabIds = new Set([...next.groups.flatMap((group) => group.tabs), ...next.ungroupedTabs].map((tab) => tab.id))
+    setSnapshot(next)
+    setSelected((current) => current.filter((id) => liveTabIds.has(id)))
+  }, [])
+
+  const refresh = useCallback(async () => {
+    if (!runtimeAvailable()) {
+      setLoading(false)
+      return
+    }
+    commitSnapshot(await getCurrentWindowSnapshot())
+    setLoading(false)
+  }, [commitSnapshot])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      if (!runtimeAvailable()) {
+        if (!cancelled) setLoading(false)
+        return
+      }
+      const preferences = await getPreferences()
+      applyTheme(preferences.themeMode)
+      let next = await getCurrentWindowSnapshot()
+      if (preferences.autoGroupOnPopupOpen) {
+        const rules = await getRules()
+        const tabs = await queryTargetWindowTabs()
+        await applyRulesToTabs(rules, tabs)
+        next = await getCurrentWindowSnapshot()
+      }
+      let loadedShortcuts: ShortcutInfo[]
+      try {
+        const response = await chrome.runtime.sendMessage({ type: 'TABWEAVE_GET_COMMANDS' })
+        loadedShortcuts = response?.commands ?? []
+      } catch {
+        loadedShortcuts = []
+      }
+      if (!cancelled) {
+        setShortcuts(loadedShortcuts)
+        commitSnapshot(next)
+        setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [commitSnapshot])
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: light)')
+    const handleChange = () => {
+      void getPreferences().then((preferences) => {
+        if (preferences.themeMode === 'system') applyTheme('system')
+      })
+    }
+    media.addEventListener('change', handleChange)
+    return () => media.removeEventListener('change', handleChange)
+  }, [])
+
+  useEffect(() => {
+    if (!runtimeAvailable()) return
+
+    let cancelled = false
+    let refreshTimer: number | undefined
+
+    const scheduleRefresh = () => {
+      window.clearTimeout(refreshTimer)
+      refreshTimer = window.setTimeout(() => {
+        if (cancelled) return
+        void refresh()
+      }, 120)
+    }
+
+    const refreshOnVisible = () => {
+      if (document.visibilityState === 'visible') scheduleRefresh()
+    }
+
+    chrome.tabs.onCreated.addListener(scheduleRefresh)
+    chrome.tabs.onRemoved.addListener(scheduleRefresh)
+    chrome.tabs.onUpdated.addListener(scheduleRefresh)
+    chrome.tabs.onMoved.addListener(scheduleRefresh)
+    chrome.tabs.onAttached.addListener(scheduleRefresh)
+    chrome.tabs.onDetached.addListener(scheduleRefresh)
+    chrome.tabGroups.onCreated.addListener(scheduleRefresh)
+    chrome.tabGroups.onRemoved.addListener(scheduleRefresh)
+    chrome.tabGroups.onUpdated.addListener(scheduleRefresh)
+    window.addEventListener('focus', scheduleRefresh)
+    document.addEventListener('visibilitychange', refreshOnVisible)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(refreshTimer)
+      chrome.tabs.onCreated.removeListener(scheduleRefresh)
+      chrome.tabs.onRemoved.removeListener(scheduleRefresh)
+      chrome.tabs.onUpdated.removeListener(scheduleRefresh)
+      chrome.tabs.onMoved.removeListener(scheduleRefresh)
+      chrome.tabs.onAttached.removeListener(scheduleRefresh)
+      chrome.tabs.onDetached.removeListener(scheduleRefresh)
+      chrome.tabGroups.onCreated.removeListener(scheduleRefresh)
+      chrome.tabGroups.onRemoved.removeListener(scheduleRefresh)
+      chrome.tabGroups.onUpdated.removeListener(scheduleRefresh)
+      window.removeEventListener('focus', scheduleRefresh)
+      document.removeEventListener('visibilitychange', refreshOnVisible)
+    }
+  }, [refresh])
+
+  async function regroup() {
+    setBusy(true)
+    setMessage('')
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'TABWEAVE_REGROUP' })
+      setMessage(response?.ok ? `已整理 ${response.changed} 个标签页` : response?.error ?? '整理失败')
+      await refresh()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function toggleGroup(groupId: number, collapsed: boolean) {
+    await chrome.tabGroups.update(groupId, { collapsed: !collapsed })
+    await refresh()
+  }
+
+  async function closeGroup(tabIds: number[]) {
+    await chrome.tabs.remove(tabIds)
+    await refresh()
+  }
+
+  async function closeTab(tabId: number) {
+    await chrome.tabs.remove(tabId)
+    await refresh()
+  }
+
+  async function activateTab(tabId: number) {
+    await chrome.tabs.update(tabId, { active: true })
+    window.close()
+  }
+
+  async function createManualGroup() {
+    if (!selected.length || !newGroupTitle.trim()) return
+    await createGroupFromTabs(selected, newGroupTitle.trim(), 'blue')
+    setSelected([])
+    setNewGroupTitle('')
+    await refresh()
+  }
+
+  const openPopupShortcut = shortcuts.find((shortcut) => shortcut.name === '_execute_action')?.shortcut || '未绑定'
+  const regroupShortcut = shortcuts.find((shortcut) => shortcut.name === 'regroup-current-window')?.shortcut || '未绑定'
+
+  return (
+    <main className="flex h-[600px] w-[420px] flex-col overflow-hidden popup-surface text-zinc-100 shadow-2xl shadow-black/40 ring-1 ring-white/10">
+      <section className="shrink-0 border-b border-white/10 px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-violet-300">TabWeave</div>
+            <h1 className="mt-0.5 text-xl font-semibold tracking-[-0.04em]">标签分组工作台</h1>
+            <p className="mt-0.5 text-xs text-zinc-500">当前窗口 · {allTabCount} 个标签 · {snapshot.groups.length} 个分组</p>
+          </div>
+          <PrimaryButton onClick={regroup} disabled={busy || loading} className="shrink-0">
+            {busy ? '整理中' : '整理'}
+          </PrimaryButton>
+        </div>
+        {message && <div className="mt-3 rounded-xl bg-violet-500/10 px-3 py-2 text-xs text-violet-200">{message}</div>}
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-600">
+          <span className="inline-flex items-center gap-1"><span>打开</span><ShortcutKeys shortcut={openPopupShortcut} subtle /></span>
+          <span className="text-zinc-700">·</span>
+          <span className="inline-flex items-center gap-1"><span>整理</span><ShortcutKeys shortcut={regroupShortcut} subtle /></span>
+        </div>
+      </section>
+
+      <section className="soft-scrollbar scroll-mask-y-10 min-h-0 flex-1 overflow-auto pb-4">
+        {!runtimeAvailable() && (
+          <div className="px-4 pt-4"><EmptyState title="请在 Chrome 扩展环境中打开" description="构建后加载 dist 目录，再从扩展图标打开 Popup。" /></div>
+        )}
+
+        {runtimeAvailable() && loading && <div className="px-4 py-12 text-center text-sm text-zinc-500">正在读取标签页…</div>}
+
+        {!loading && runtimeAvailable() && (
+          <div className="space-y-5">
+            <div>
+              <div className="sticky top-0 z-20 mb-3 flex min-h-11 items-center justify-between border-b border-white/10 bg-zinc-950 px-4 py-2 shadow-[0_10px_24px_rgba(9,9,11,.72)] theme-light-soft-sticky">
+                <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Groups</h2>
+                <GhostButton onClick={() => chrome.runtime.openOptionsPage()} className="px-2 py-1 text-xs">规则设置</GhostButton>
+              </div>
+              {snapshot.groups.length === 0 ? (
+                <div className="px-4"><EmptyState title="还没有分组" description="点击立即整理，或在下方选择未分组标签手动创建。" /></div>
+              ) : (
+                <div className="space-y-3 px-4">
+                  {snapshot.groups.map((group) => (
+                    <div key={group.id} className="rounded-2xl bg-white/[0.04] p-3 ring-1 ring-white/10">
+                      <button onClick={() => toggleGroup(group.id, group.collapsed)} className="group/header flex w-full items-center justify-between gap-2 rounded-xl px-2 py-1.5 text-left transition hover:bg-white/5">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className={`h-2.5 w-2.5 rounded-full ${COLOR_CLASS[group.color]}`} />
+                          <span className="truncate text-sm font-semibold">{group.title}</span>
+                          <span className="text-xs text-zinc-500">{group.tabs.length}</span>
+                          <svg className={`h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform duration-300 ${group.collapsed ? '-rotate-90' : 'rotate-0'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                            <path d="m6 9 6 6 6-6" />
+                          </svg>
+                        </span>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void closeGroup(group.tabs.map((tab) => tab.id))
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key !== 'Enter' && event.key !== ' ') return
+                            event.preventDefault()
+                            event.stopPropagation()
+                            void closeGroup(group.tabs.map((tab) => tab.id))
+                          }}
+                          className="rounded-lg px-2 py-1 text-xs text-zinc-500 transition hover:bg-red-500/10 hover:text-red-300"
+                        >
+                          关闭
+                        </span>
+                      </button>
+                      <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${group.collapsed ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100'}`}>
+                        <div className="min-h-0 overflow-hidden">
+                          <div className="mt-3 space-y-1.5">
+                            {group.tabs.slice(0, 5).map((tab) => (
+                              <div key={tab.id} className="flex items-center gap-1 rounded-lg px-2 py-1.5 hover:bg-white/5">
+                                <button onClick={() => activateTab(tab.id)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+                                  <TabIcon tab={tab} />
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate text-xs font-medium text-zinc-300">{tab.title}</span>
+                                    <span className="block truncate text-[11px] text-zinc-600">{tab.url}</span>
+                                  </span>
+                                </button>
+                                <button onClick={() => closeTab(tab.id)} className="shrink-0 rounded-md px-1.5 py-1 text-[11px] text-zinc-600 transition hover:bg-red-500/10 hover:text-red-300" title="关闭标签页">
+                                  关闭
+                                </button>
+                              </div>
+                            ))}
+                            {group.tabs.length > 5 && <div className="px-2 pt-1 text-xs text-zinc-600">还有 {group.tabs.length - 5} 个标签</div>}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <div className="sticky top-0 z-20 mb-3 flex min-h-11 items-center justify-between border-b border-white/10 bg-zinc-950 px-4 py-2 shadow-[0_10px_24px_rgba(9,9,11,.72)] theme-light-soft-sticky">
+                <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Ungrouped</h2>
+                <span className="rounded-xl bg-zinc-900/70 px-2 py-1 text-xs font-medium text-zinc-500 ring-1 ring-white/10">{snapshot.ungroupedTabs.length}</span>
+              </div>
+              <div className="space-y-2 px-4">
+                {snapshot.ungroupedTabs.map((tab) => (
+                  <div key={tab.id} className="flex items-center gap-3 rounded-xl bg-white/[0.04] px-3 py-2 ring-1 ring-white/10">
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(tab.id)}
+                      onChange={(event) => setSelected((current) => event.target.checked ? [...current, tab.id] : current.filter((id) => id !== tab.id))}
+                      className="accent-violet-500"
+                      aria-label={`选择 ${tab.title}`}
+                    />
+                    <TabIcon tab={tab} />
+                    <button type="button" onClick={() => activateTab(tab.id)} className="min-w-0 flex-1 text-left">
+                      <div className="truncate text-xs font-medium text-zinc-200">{tab.title}</div>
+                      <div className="truncate text-[11px] text-zinc-600">{tab.url}</div>
+                    </button>
+                    <button type="button" onClick={() => closeTab(tab.id)} className="shrink-0 rounded-md px-1.5 py-1 text-[11px] text-zinc-600 transition hover:bg-red-500/10 hover:text-red-300" title="关闭标签页">
+                      关闭
+                    </button>
+                  </div>
+                ))}
+                {snapshot.ungroupedTabs.length === 0 && <div className="px-4 text-xs text-zinc-600">所有标签都已进入分组。</div>}
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="shrink-0 border-t border-white/10 bg-zinc-950/90 p-2.5 shadow-[0_-10px_24px_rgba(9,9,11,.22)] theme-light-footer-divider">
+        {selected.length > 0 ? (
+          <>
+            <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+              <div>
+                <span className="font-medium text-zinc-300">手动建组</span>
+                <span className="ml-2 text-zinc-600">已选 {selected.length} 个标签</span>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <TextInput value={newGroupTitle} onChange={(event) => setNewGroupTitle(event.target.value)} placeholder="输入分组名称" />
+              <PrimaryButton onClick={createManualGroup} disabled={!newGroupTitle.trim()} className="shrink-0">建组</PrimaryButton>
+            </div>
+          </>
+        ) : (
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="text-zinc-600">勾选未分组标签后可手动建组</span>
+          </div>
+        )}
+      </section>
+    </main>
+  )
+}
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <Popup />
+  </StrictMode>,
+)

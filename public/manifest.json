@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "TabWeave",
+  "description": "管理 Chrome Tab 分组，并用域名、关键词和正则规则自动整理标签页。",
+  "version": "0.1.0",
+  "action": {
+    "default_title": "TabWeave",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "打开 TabWeave Popup"
+    },
+    "regroup-current-window": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+G",
+        "mac": "Alt+Shift+G"
+      },
+      "description": "立即整理当前窗口"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}

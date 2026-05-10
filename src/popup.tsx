@@ -5,8 +5,10 @@ import { COLOR_CLASS } from './lib/constants'
 import { getPreferences, getRules } from './lib/storage'
 import { applyTheme } from './lib/theme'
 import { getShortcutParts } from './lib/shortcuts'
+import { GITHUB_ISSUES_URL, GITHUB_REPO_URL, getExtensionVersion, openExternalUrl } from './lib/links'
+import { getMessages } from './lib/i18n'
 import { applyRulesToTabs, createGroupFromTabs, getCurrentWindowSnapshot, queryTargetWindowTabs } from './lib/grouping'
-import type { ShortcutInfo, TabSnapshot, WindowSnapshot } from './lib/types'
+import type { LanguageMode, ShortcutInfo, TabSnapshot, WindowSnapshot } from './lib/types'
 import { EmptyState, GhostButton, PrimaryButton, TextInput } from './components/ui'
 
 function runtimeAvailable() {
@@ -67,6 +69,7 @@ export function Popup() {
   const [newGroupTitle, setNewGroupTitle] = useState('')
   const [message, setMessage] = useState('')
   const [shortcuts, setShortcuts] = useState<ShortcutInfo[]>([])
+  const [languageMode, setLanguageMode] = useState<LanguageMode>('system')
 
   const allTabCount = useMemo(
     () => snapshot.ungroupedTabs.length + snapshot.groups.reduce((total, group) => total + group.tabs.length, 0),
@@ -112,6 +115,7 @@ export function Popup() {
         loadedShortcuts = []
       }
       if (!cancelled) {
+        setLanguageMode(preferences.languageMode)
         setShortcuts(loadedShortcuts)
         commitSnapshot(next)
         setLoading(false)
@@ -185,7 +189,7 @@ export function Popup() {
     setMessage('')
     try {
       const response = await chrome.runtime.sendMessage({ type: 'TABWEAVE_REGROUP' })
-      setMessage(response?.ok ? `已整理 ${response.changed} 个标签页` : response?.error ?? '整理失败')
+      setMessage(response?.ok ? t.organized.replace('{count}', String(response.changed)) : response?.error ?? t.failed)
       await refresh()
     } finally {
       setBusy(false)
@@ -220,8 +224,10 @@ export function Popup() {
     await refresh()
   }
 
-  const openPopupShortcut = shortcuts.find((shortcut) => shortcut.name === '_execute_action')?.shortcut || '未绑定'
-  const regroupShortcut = shortcuts.find((shortcut) => shortcut.name === 'regroup-current-window')?.shortcut || '未绑定'
+  const t = getMessages(languageMode)
+  const openPopupShortcut = shortcuts.find((shortcut) => shortcut.name === '_execute_action')?.shortcut || t.unbound
+  const regroupShortcut = shortcuts.find((shortcut) => shortcut.name === 'regroup-current-window')?.shortcut || t.unbound
+  const extensionVersion = getExtensionVersion()
 
   return (
     <main className="flex h-[600px] w-[420px] flex-col overflow-hidden popup-surface text-zinc-100 shadow-2xl shadow-black/40 ring-1 ring-white/10">
@@ -229,37 +235,37 @@ export function Popup() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-violet-300">TabWeave</div>
-            <h1 className="mt-0.5 text-xl font-semibold tracking-[-0.04em]">标签分组工作台</h1>
-            <p className="mt-0.5 text-xs text-zinc-500">当前窗口 · {allTabCount} 个标签 · {snapshot.groups.length} 个分组</p>
+            <h1 className="mt-0.5 text-xl font-semibold tracking-[-0.04em]">{t.popupTitle}</h1>
+            <p className="mt-0.5 text-xs text-zinc-500">{t.currentWindowStats.replace('{tabs}', String(allTabCount)).replace('{groups}', String(snapshot.groups.length))}</p>
           </div>
           <PrimaryButton onClick={regroup} disabled={busy || loading} className="shrink-0">
-            {busy ? '整理中' : '整理'}
+            {busy ? t.organizing : t.organize}
           </PrimaryButton>
         </div>
         {message && <div className="mt-3 rounded-xl bg-violet-500/10 px-3 py-2 text-xs text-violet-200">{message}</div>}
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-600">
-          <span className="inline-flex items-center gap-1"><span>打开</span><ShortcutKeys shortcut={openPopupShortcut} subtle /></span>
+          <span className="inline-flex items-center gap-1"><span>{t.open}</span><ShortcutKeys shortcut={openPopupShortcut} subtle /></span>
           <span className="text-zinc-700">·</span>
-          <span className="inline-flex items-center gap-1"><span>整理</span><ShortcutKeys shortcut={regroupShortcut} subtle /></span>
+          <span className="inline-flex items-center gap-1"><span>{t.organize}</span><ShortcutKeys shortcut={regroupShortcut} subtle /></span>
         </div>
       </section>
 
       <section className="soft-scrollbar scroll-mask-y-10 min-h-0 flex-1 overflow-auto pb-4">
         {!runtimeAvailable() && (
-          <div className="px-4 pt-4"><EmptyState title="请在 Chrome 扩展环境中打开" description="构建后加载 dist 目录，再从扩展图标打开 Popup。" /></div>
+          <div className="px-4 pt-4"><EmptyState title={t.runtimeTitle} description={t.runtimeDesc} /></div>
         )}
 
-        {runtimeAvailable() && loading && <div className="px-4 py-12 text-center text-sm text-zinc-500">正在读取标签页…</div>}
+        {runtimeAvailable() && loading && <div className="px-4 py-12 text-center text-sm text-zinc-500">{t.loadingTabs}</div>}
 
         {!loading && runtimeAvailable() && (
           <div className="space-y-5">
             <div>
               <div className="sticky top-0 z-20 mb-3 flex min-h-11 items-center justify-between border-b border-white/10 bg-zinc-950 px-4 py-2 shadow-[0_10px_24px_rgba(9,9,11,.72)] theme-light-soft-sticky">
                 <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Groups</h2>
-                <GhostButton onClick={() => chrome.runtime.openOptionsPage()} className="px-2 py-1 text-xs">规则设置</GhostButton>
+                <GhostButton onClick={() => chrome.runtime.openOptionsPage()} className="px-2 py-1 text-xs">{t.settings}</GhostButton>
               </div>
               {snapshot.groups.length === 0 ? (
-                <div className="px-4"><EmptyState title="还没有分组" description="点击立即整理，或在下方选择未分组标签手动创建。" /></div>
+                <div className="px-4"><EmptyState title={t.noGroups} description={t.noGroupsDesc} /></div>
               ) : (
                 <div className="space-y-3 px-4">
                   {snapshot.groups.map((group) => (
@@ -288,7 +294,7 @@ export function Popup() {
                           }}
                           className="rounded-lg px-2 py-1 text-xs text-zinc-500 transition hover:bg-red-500/10 hover:text-red-300"
                         >
-                          关闭
+                          {t.close}
                         </span>
                       </button>
                       <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${group.collapsed ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100'}`}>
@@ -303,12 +309,12 @@ export function Popup() {
                                     <span className="block truncate text-[11px] text-zinc-600">{tab.url}</span>
                                   </span>
                                 </button>
-                                <button onClick={() => closeTab(tab.id)} className="shrink-0 rounded-md px-1.5 py-1 text-[11px] text-zinc-600 transition hover:bg-red-500/10 hover:text-red-300" title="关闭标签页">
-                                  关闭
+                                <button onClick={() => closeTab(tab.id)} className="shrink-0 rounded-md px-1.5 py-1 text-[11px] text-zinc-600 transition hover:bg-red-500/10 hover:text-red-300" title={t.closeTab}>
+                                  {t.close}
                                 </button>
                               </div>
                             ))}
-                            {group.tabs.length > 5 && <div className="px-2 pt-1 text-xs text-zinc-600">还有 {group.tabs.length - 5} 个标签</div>}
+                            {group.tabs.length > 5 && <div className="px-2 pt-1 text-xs text-zinc-600">{t.moreTabs.replace('{count}', String(group.tabs.length - 5))}</div>}
                           </div>
                         </div>
                       </div>
@@ -331,19 +337,19 @@ export function Popup() {
                       checked={selected.includes(tab.id)}
                       onChange={(event) => setSelected((current) => event.target.checked ? [...current, tab.id] : current.filter((id) => id !== tab.id))}
                       className="accent-violet-500"
-                      aria-label={`选择 ${tab.title}`}
+                      aria-label={`${t.add} ${tab.title}`}
                     />
                     <TabIcon tab={tab} />
                     <button type="button" onClick={() => activateTab(tab.id)} className="min-w-0 flex-1 text-left">
                       <div className="truncate text-xs font-medium text-zinc-200">{tab.title}</div>
                       <div className="truncate text-[11px] text-zinc-600">{tab.url}</div>
                     </button>
-                    <button type="button" onClick={() => closeTab(tab.id)} className="shrink-0 rounded-md px-1.5 py-1 text-[11px] text-zinc-600 transition hover:bg-red-500/10 hover:text-red-300" title="关闭标签页">
-                      关闭
+                    <button type="button" onClick={() => closeTab(tab.id)} className="shrink-0 rounded-md px-1.5 py-1 text-[11px] text-zinc-600 transition hover:bg-red-500/10 hover:text-red-300" title={t.closeTab}>
+                      {t.close}
                     </button>
                   </div>
                 ))}
-                {snapshot.ungroupedTabs.length === 0 && <div className="px-4 text-xs text-zinc-600">所有标签都已进入分组。</div>}
+                {snapshot.ungroupedTabs.length === 0 && <div className="px-4 text-xs text-zinc-600">{t.allGrouped}</div>}
               </div>
             </div>
           </div>
@@ -355,18 +361,23 @@ export function Popup() {
           <>
             <div className="mb-2 flex items-center justify-between gap-3 text-xs">
               <div>
-                <span className="font-medium text-zinc-300">手动建组</span>
-                <span className="ml-2 text-zinc-600">已选 {selected.length} 个标签</span>
+                <span className="font-medium text-zinc-300">{t.manualGroup}</span>
+                <span className="ml-2 text-zinc-600">{t.selectedTabs.replace('{count}', String(selected.length))}</span>
               </div>
             </div>
             <div className="flex gap-2">
-              <TextInput value={newGroupTitle} onChange={(event) => setNewGroupTitle(event.target.value)} placeholder="输入分组名称" />
-              <PrimaryButton onClick={createManualGroup} disabled={!newGroupTitle.trim()} className="shrink-0">建组</PrimaryButton>
+              <TextInput value={newGroupTitle} onChange={(event) => setNewGroupTitle(event.target.value)} placeholder={t.groupNamePlaceholder} />
+              <PrimaryButton onClick={createManualGroup} disabled={!newGroupTitle.trim()} className="shrink-0">{t.createGroup}</PrimaryButton>
             </div>
           </>
         ) : (
           <div className="flex items-center justify-between gap-3 text-xs">
-            <span className="text-zinc-600">勾选未分组标签后可手动建组</span>
+            <span className="text-zinc-600">{t.selectToGroup}</span>
+            <span className="flex items-center gap-2 text-zinc-600">
+              <span>v{extensionVersion}</span>
+              <button type="button" onClick={() => openExternalUrl(GITHUB_REPO_URL)} className="hover:text-violet-300">GitHub</button>
+              <button type="button" onClick={() => openExternalUrl(GITHUB_ISSUES_URL)} className="hover:text-violet-300">{t.feedback}</button>
+            </span>
           </div>
         )}
       </section>

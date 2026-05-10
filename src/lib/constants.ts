@@ -11,6 +11,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   syncRules: true,
   autoGroupOnPopupOpen: false,
   themeMode: 'dark',
+  languageMode: 'system',
 }
 
 export const GROUP_COLORS: ChromeGroupColor[] = [
@@ -59,7 +60,7 @@ export const DEFAULT_RULES: AutoGroupRule[] = [
     enabled: true,
     target: 'url',
     mode: 'regex',
-    pattern: '^chrome(-extension)?://',
+    pattern: '^chrome-extension://|^chrome://(?!newtab/?$)',
     groupTitle: 'Chrome',
     color: 'blue',
     scope: 'currentWindow',
@@ -140,6 +141,33 @@ export const DEFAULT_RULES: AutoGroupRule[] = [
     pattern: '(mail\\.google\\.com|outlook\\.live\\.com|outlook\\.office\\.com|calendar\\.google\\.com)',
     groupTitle: 'Mail',
     color: 'orange',
+    scope: 'currentWindow',
+    createdAt: defaultTimestamp,
+    updatedAt: defaultTimestamp,
+  },
+  {
+    id: 'video-default',
+    name: '视频与流媒体',
+    enabled: true,
+    target: 'domain',
+    mode: 'regex',
+    pattern: '(youtube\\.com|youtu\\.be|netflix\\.com|vimeo\\.com|twitch\\.tv)\n(bilibili\\.com|douyin\\.com|kuaishou\\.com|iqiyi\\.com|youku\\.com)',
+    conditions: [
+      {
+        id: 'video-global-condition',
+        target: 'domain',
+        mode: 'regex',
+        pattern: '(youtube\\.com|youtu\\.be|netflix\\.com|vimeo\\.com|twitch\\.tv)',
+      },
+      {
+        id: 'video-cn-condition',
+        target: 'domain',
+        mode: 'regex',
+        pattern: '(bilibili\\.com|douyin\\.com|kuaishou\\.com|iqiyi\\.com|youku\\.com)',
+      },
+    ],
+    groupTitle: 'Video',
+    color: 'red',
     scope: 'currentWindow',
     createdAt: defaultTimestamp,
     updatedAt: defaultTimestamp,

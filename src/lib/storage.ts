@@ -23,24 +23,64 @@ export async function savePreferences(preferences: Preferences): Promise<void> {
   await chrome.storage.sync.set({ [STORAGE_KEYS.preferences]: preferences })
 }
 
-function mergeDefaultRules(rules: AutoGroupRule[]): AutoGroupRule[] {
-  const existingIds = new Set(rules.map((rule) => rule.id))
-  const migrated = rules.map((rule) =>
+function normalizeRule(rule: AutoGroupRule): AutoGroupRule {
+  const migratedRule =
     rule.id === 'chrome-management-default'
       ? {
           ...rule,
           name: 'Chrome 与扩展页面',
           target: 'url' as const,
           mode: 'regex' as const,
-          pattern: '^chrome(-extension)?://',
+          pattern: '^chrome-extension://|^chrome://(?!newtab/?$)',
           groupTitle: rule.groupTitle || 'Chrome',
           color: rule.color || 'blue',
           updatedAt: Date.now(),
         }
-      : rule,
-  )
+      : rule.id === 'video-default'
+        ? {
+            ...rule,
+            name: rule.name || '视频与流媒体',
+            target: 'domain' as const,
+            mode: 'regex' as const,
+            pattern: '(youtube\\.com|youtu\\.be|netflix\\.com|vimeo\\.com|twitch\\.tv)\n(bilibili\\.com|douyin\\.com|kuaishou\\.com|iqiyi\\.com|youku\\.com)',
+            conditions: [
+              {
+                id: 'video-global-condition',
+                target: 'domain' as const,
+                mode: 'regex' as const,
+                pattern: '(youtube\\.com|youtu\\.be|netflix\\.com|vimeo\\.com|twitch\\.tv)',
+              },
+              {
+                id: 'video-cn-condition',
+                target: 'domain' as const,
+                mode: 'regex' as const,
+                pattern: '(bilibili\\.com|douyin\\.com|kuaishou\\.com|iqiyi\\.com|youku\\.com)',
+              },
+            ],
+            groupTitle: rule.groupTitle || 'Video',
+            color: rule.color || 'red',
+            updatedAt: Date.now(),
+          }
+        : rule
 
-  const additions = DEFAULT_RULES.filter((rule) => !existingIds.has(rule.id))
+  if (Array.isArray(migratedRule.conditions) && migratedRule.conditions.length > 0) return migratedRule
+  return {
+    ...migratedRule,
+    conditions: [
+      {
+        id: `${migratedRule.id}-condition-1`,
+        target: migratedRule.target,
+        mode: migratedRule.mode,
+        pattern: migratedRule.pattern,
+      },
+    ],
+  }
+}
+
+function mergeDefaultRules(rules: AutoGroupRule[]): AutoGroupRule[] {
+  const existingIds = new Set(rules.map((rule) => rule.id))
+  const migrated = rules.map(normalizeRule)
+  const additions = DEFAULT_RULES.filter((rule) => !existingIds.has(rule.id)).map(normalizeRule)
   return additions.length > 0 ? [...additions, ...migrated] : migrated
 }
 

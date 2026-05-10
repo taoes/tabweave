@@ -1,4 +1,4 @@
-import type { AutoGroupRule, GroupSnapshot, TabSnapshot, WindowSnapshot } from './types'
+import type { AutoGroupRule, GroupSnapshot, RuleCondition, TabSnapshot, WindowSnapshot } from './types'
 
 export const UNGROUPED_ID = typeof chrome !== 'undefined' && chrome.tabGroups ? chrome.tabGroups.TAB_GROUP_ID_NONE : -1
 
@@ -10,30 +10,53 @@ export function getDomain(url = ''): string {
   }
 }
 
+function getPatternItems(pattern: string) {
+  return pattern
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
 export function testPattern(value: string, pattern: string, mode: AutoGroupRule['mode']): boolean {
-  if (!pattern.trim()) return false
-  if (mode === 'equals') return value.toLowerCase() === pattern.toLowerCase()
-  if (mode === 'contains') return value.toLowerCase().includes(pattern.toLowerCase())
-  try {
-    return new RegExp(pattern, 'i').test(value)
-  } catch {
-    return false
-  }
+  const patterns = getPatternItems(pattern)
+  if (patterns.length === 0) return false
+
+  return patterns.some((item) => {
+    if (mode === 'equals') return value.toLowerCase() === item.toLowerCase()
+    if (mode === 'contains') return value.toLowerCase().includes(item.toLowerCase())
+    try {
+      return new RegExp(item, 'i').test(value)
+    } catch {
+      return false
+    }
+  })
 }
 
 export function isValidRegex(pattern: string): boolean {
-  try {
-    new RegExp(pattern)
-    return true
-  } catch {
-    return false
-  }
+  const patterns = getPatternItems(pattern)
+  if (patterns.length === 0) return false
+  return patterns.every((item) => {
+    try {
+      new RegExp(item)
+      return true
+    } catch {
+      return false
+    }
+  })
+}
+
+function getConditionValue(condition: Pick<RuleCondition, 'target'>, tab: chrome.tabs.Tab) {
+  return condition.target === 'domain' ? getDomain(tab.url) : condition.target === 'title' ? tab.title ?? '' : tab.url ?? ''
+}
+
+export function getRuleConditions(rule: AutoGroupRule): RuleCondition[] {
+  if (Array.isArray(rule.conditions) && rule.conditions.length > 0) return rule.conditions
+  return [{ id: `${rule.id}-legacy-condition`, target: rule.target, mode: rule.mode, pattern: rule.pattern }]
 }
 
 export function matchRule(rule: AutoGroupRule, tab: chrome.tabs.Tab): boolean {
   if (!rule.enabled) return false
-  const value = rule.target === 'domain' ? getDomain(tab.url) : rule.target === 'title' ? tab.title ?? '' : tab.url ?? ''
-  return testPattern(value, rule.pattern, rule.mode)
+  return getRuleConditions(rule).some((condition) => testPattern(getConditionValue(condition, tab), condition.pattern, condition.mode))
 }
 
 async function findExistingGroup(windowId: number, title: string) {
@@ -56,18 +79,29 @@ export async function applyRuleToTab(rule: AutoGroupRule, tab: chrome.tabs.Tab):
   return true
 }
 
+
+export async function reconcileTabWithRules(rules: AutoGroupRule[], tab: chrome.tabs.Tab): Promise<'grouped' | 'ungrouped' | 'unchanged'> {
+  for (const rule of rules.filter((item) => item.enabled)) {
+    const applied = await applyRuleToTab(rule, tab)
+    if (applied) return 'grouped'
+  }
+
+  if (!tab.id || typeof tab.groupId !== 'number' || tab.groupId === UNGROUPED_ID) return 'unchanged'
+
+  const managedGroupTitles = new Set(rules.filter((rule) => rule.enabled).map((rule) => rule.groupTitle))
+  const group = await chrome.tabGroups.get(tab.groupId).catch(() => undefined)
+  if (!group?.title || !managedGroupTitles.has(group.title)) return 'unchanged'
+
+  await chrome.tabs.ungroup(tab.id)
+  return 'ungrouped'
+}
+
 export async function applyRulesToTabs(rules: AutoGroupRule[], tabs: chrome.tabs.Tab[]): Promise<number> {
   let changed = 0
-  const enabledRules = rules.filter((rule) => rule.enabled)
   for (const tab of tabs) {
-    for (const rule of enabledRules) {
-      if (rule.scope === 'currentWindow' && tabs[0]?.windowId !== tab.windowId) continue
-      const applied = await applyRuleToTab(rule, tab)
-      if (applied) {
-        changed += 1
-        break
-      }
-    }
+    const scopedRules = rules.filter((rule) => rule.scope !== 'currentWindow' || tabs[0]?.windowId === tab.windowId)
+    const result = await reconcileTabWithRules(scopedRules, tab)
+    if (result !== 'unchanged') changed += 1
   }
   return changed
 }

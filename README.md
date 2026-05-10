@@ -1,67 +1,131 @@
 # TabWeave
 
-TabWeave 是一个 Chrome Tab 分组管理扩展：支持查看和管理当前窗口分组，并通过域名、URL、标题与正则规则自动把标签页整理到对应分组。
+[中文文档](./README.zh-CN.md) · [GitHub Issues](https://github.com/zxpzdtom/tabweave/issues/new)
 
-## 技术栈
+TabWeave is a Chrome extension for keeping tab groups clean with rule-based automation. It can group tabs by domain, full URL, page title, or regular expressions, then keep existing managed groups in sync as pages finish loading.
 
-- Vite
-- React
-- TypeScript
-- Tailwind CSS
-- Chrome Extension Manifest V3
+## Highlights
 
-## 功能
+- **Rule-based tab grouping** using domain, URL, title, contains, equals, and regex matching.
+- **Multiple conditions per rule**. Each condition has its own field, match mode, and pattern.
+- **Popup workspace** for checking groups, expanding/collapsing groups, closing tabs, and creating manual groups.
+- **Options page** for rule CRUD, drag-to-reorder priority, import/export, preferences, shortcuts, and issue links.
+- **Automatic reconciliation**. If a tab no longer matches the rule that grouped it, TabWeave can move it back to ungrouped.
+- **Dark, light, and system themes**.
+- **Chinese / English UI**, defaulting to the browser language.
+- **Chrome command shortcuts** for opening the popup and organizing the current window.
 
-- Popup：查看当前窗口 Tab Groups、折叠/展开、关闭分组、手动把未分组标签创建为新分组
-- Options：管理自动分组规则，支持新增、复制、删除、启停、颜色与作用范围
-- 匹配方式：包含、等于、正则
-- 匹配字段：域名、URL、标题
-- 自动触发：新标签创建、URL 加载完成
-- 规则导入 / 导出
-- 规则测试器
-- 偏好设置：是否自动整理、是否使用 Chrome 同步存储
+## Screens and entry points
 
-## 开发
+TabWeave ships two extension pages:
+
+- **Popup**: quick workspace for the current window.
+- **Options**: rule management and preferences.
+
+The background service worker listens for tab creation, tab updates, and extension commands.
+
+## Default rules
+
+TabWeave includes a practical starter set:
+
+| Rule | Examples | Group |
+| --- | --- | --- |
+| Blank pages | `chrome://newtab/`, `about:blank` | `Blank` |
+| Chrome and extension pages | `chrome://settings/`, extension options pages | `Chrome` |
+| GitHub workflow | `github.com` | `Code` |
+| Documentation | docs, documentation, guide, manual, 文档, 指南 | `Docs` |
+| AI assistants | ChatGPT, Claude, Gemini, Perplexity, Poe, Kimi, Doubao | `AI` |
+| Design tools | Figma, Canva, Dribbble, Behance | `Design` |
+| Notes and knowledge | Notion, Yuque, Feishu, Lark | `Notes` |
+| Mail and calendar | Gmail, Outlook, Google Calendar | `Mail` |
+| Video and streaming | YouTube, Bilibili, Netflix, Vimeo, Twitch, Douyin, Kuaishou, iQIYI, Youku | `Video` |
+| Local development | localhost, 127.0.0.1, 0.0.0.0, ::1 | `Local Dev` |
+
+New default rules are merged into existing installations without overwriting user-created rules.
+
+## Rule model
+
+A rule contains:
+
+- Rule name
+- Target group name
+- Group color
+- Enabled state
+- One or more match conditions
+
+Each condition contains:
+
+- **Field**: domain, URL, or title
+- **Mode**: contains, equals, or regex
+- **Pattern**: one or more lines; each line is treated as an OR condition
+
+Rules are evaluated from top to bottom. The first enabled rule that matches a tab decides the target group.
+
+## Development
 
 ```bash
 npm install
 npm run dev
 ```
 
-开发服务器用于调试 React 页面。Chrome 扩展能力需要构建后加载 `dist`。
+The Vite dev server is useful for React page development. Chrome extension APIs require loading the built `dist` directory in Chrome.
 
-## 构建并加载到 Chrome
+## Build
 
 ```bash
 npm run build
 ```
 
-然后：
+Then load the extension:
 
-1. 打开 Chrome `chrome://extensions`
-2. 开启“开发者模式”
-3. 点击“加载已解压的扩展程序”
-4. 选择本项目的 `dist` 目录
+1. Open `chrome://extensions`.
+2. Enable **Developer mode**.
+3. Click **Load unpacked**.
+4. Select the project `dist` directory.
 
-## 项目结构
+## Shortcuts
+
+Declared shortcuts:
+
+| Action | macOS | Windows / Linux |
+| --- | --- | --- |
+| Open Popup | Command + Shift + Y | Ctrl + Shift + Y |
+| Organize current window | Option + Shift + G | Ctrl + Shift + G |
+
+Chrome may leave a shortcut unset if it conflicts with another command. You can change shortcuts at:
+
+```text
+chrome://extensions/shortcuts
+```
+
+## Sync notes
+
+TabWeave can store preferences and rules in `chrome.storage.sync`. During development, cross-device sync only works reliably when the extension ID is the same on every device. Unpacked extensions often have different IDs across machines. Published Chrome Web Store extensions have stable IDs.
+
+For development builds, import/export is the most reliable way to move rules between machines.
+
+## Project structure
 
 ```text
 src/
-  background.ts        # MV3 service worker，监听标签页事件并执行自动分组
-  popup.tsx            # 扩展 Popup UI
-  options.tsx          # 设置页 / 规则管理 UI
-  components/ui.tsx    # 基础 UI 组件
+  background.ts          MV3 service worker
+  popup.tsx              Popup workspace
+  options.tsx            Options / rule editor
+  components/ui.tsx      Shared UI primitives
   lib/
-    constants.ts       # 默认规则、颜色、存储键
-    grouping.ts        # 匹配、分组、窗口快照逻辑
-    storage.ts         # chrome.storage 封装
-    types.ts           # 类型定义
+    constants.ts         Default rules, colors, storage keys
+    grouping.ts          Rule matching, grouping, reconciliation
+    i18n.ts              Chinese / English messages
+    links.ts             GitHub and extension metadata links
+    shortcuts.ts         Platform-aware shortcut formatting
+    storage.ts           chrome.storage wrapper
+    theme.ts             Theme application helpers
+    types.ts             Shared TypeScript types
 public/
-  manifest.json        # Chrome Extension Manifest V3
+  manifest.json          Chrome extension manifest
+  icons/                 Extension icons
 ```
 
-## 规则说明
+## License
 
-规则按列表顺序执行。标签页匹配到第一条启用规则后，会被移动到该规则指定的分组。如果当前窗口中已有同名分组，TabWeave 会复用它。
-
-默认规则会把 `chrome://settings/`、`chrome://extensions/` 和扩展的 `options.html` 汇总到 `Chrome` 分组。
+MIT

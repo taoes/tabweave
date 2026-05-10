@@ -169,3 +169,9 @@ button { cursor: pointer; }
     radial-gradient(circle at 80% 0%, rgba(139, 92, 246, .14), transparent 30%),
     #f8fafc !important;
 }
+
+:root[data-theme='light'] .theme-light-toast {
+  background-color: rgba(255, 255, 255, .96) !important;
+  color: #18181b !important;
+  box-shadow: 0 18px 45px rgba(148, 163, 184, .28) !important;
+}

@@ -1,5 +1,5 @@
 import { getPreferences, getRules } from './lib/storage'
-import { applyRuleToTab, applyRulesToTabs, queryTargetWindowTabs } from './lib/grouping'
+import { applyRulesToTabs, queryTargetWindowTabs, reconcileTabWithRules } from './lib/grouping'
 
 async function regroupCurrentWindow() {
   const rules = await getRules()
@@ -26,10 +26,7 @@ chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
   const preferences = await getPreferences()
   if (!preferences.autoGroupOnUpdate) return
   const rules = await getRules()
-  for (const rule of rules) {
-    const applied = await applyRuleToTab(rule, tab)
-    if (applied) break
-  }
+  await reconcileTabWithRules(rules, tab)
 })
 
 chrome.commands.onCommand.addListener((command) => {

@@ -2,6 +2,7 @@ export type MatchTarget = 'url' | 'title' | 'domain'
 export type MatchMode = 'contains' | 'regex' | 'equals'
 export type RuleScope = 'currentWindow' | 'allWindows'
 export type ThemeMode = 'dark' | 'light' | 'system'
+export type LanguageMode = 'system' | 'zh' | 'en'
 
 export type ChromeGroupColor =
   | 'grey'
@@ -14,6 +15,13 @@ export type ChromeGroupColor =
   | 'cyan'
   | 'orange'
 
+export interface RuleCondition {
+  id: string
+  target: MatchTarget
+  mode: MatchMode
+  pattern: string
+}
+
 export interface AutoGroupRule {
   id: string
   name: string
@@ -21,6 +29,7 @@ export interface AutoGroupRule {
   target: MatchTarget
   mode: MatchMode
   pattern: string
+  conditions?: RuleCondition[]
   groupTitle: string
   color: ChromeGroupColor
   scope: RuleScope
@@ -34,6 +43,7 @@ export interface Preferences {
   syncRules: boolean
   autoGroupOnPopupOpen: boolean
   themeMode: ThemeMode
+  languageMode: LanguageMode
 }
 
 export interface ShortcutInfo {

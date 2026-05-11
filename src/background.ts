@@ -1,10 +1,35 @@
 import { getPreferences, getRules } from './lib/storage'
-import { applyRulesToTabs, queryTargetWindowTabs, reconcileTabWithRules } from './lib/grouping'
+import { applyRulesToTabs, getTargetWindowId, queryTargetWindowTabs, reconcileTabWithRules } from './lib/grouping'
 
 async function regroupCurrentWindow() {
   const rules = await getRules()
   const tabs = await queryTargetWindowTabs()
   return applyRulesToTabs(rules, tabs)
+}
+
+async function collapseAllGroups(): Promise<number> {
+  const windowId = await getTargetWindowId()
+  if (typeof windowId !== 'number') return 0
+  const groups = await chrome.tabGroups.query({ windowId })
+  let collapsed = 0
+  for (const group of groups) {
+    if (!group.collapsed) {
+      await chrome.tabGroups.update(group.id, { collapsed: true })
+      collapsed++
+    }
+  }
+  return collapsed
+}
+
+let lastShortcutActionWasOrganize = false
+
+async function toggleOrganizeOrCollapse() {
+  if (lastShortcutActionWasOrganize) {
+    lastShortcutActionWasOrganize = false
+    return collapseAllGroups()
+  }
+  lastShortcutActionWasOrganize = true
+  return regroupCurrentWindow()
 }
 
 chrome.runtime.onInstalled.addListener(async ({ reason }) => {
@@ -31,7 +56,7 @@ chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
 
 chrome.commands.onCommand.addListener((command) => {
   if (command !== 'regroup-current-window') return
-  void regroupCurrentWindow()
+  void toggleOrganizeOrCollapse()
 })
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
